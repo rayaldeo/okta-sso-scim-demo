@@ -1,0 +1,30 @@
+# Secrets and local config: never commit these
+.env
+.env.*
+!.env.example
+
+# SAML SP signing material (generated locally, see README)
+certs/
+*.pem
+*.key
+*.crt
+*.p12
+
+# Local database
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Build and test output
+/bin/
+/dist/
+*.exe
+coverage.out
+coverage.html
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

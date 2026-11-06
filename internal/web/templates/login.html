@@ -1,0 +1,24 @@
+{{define "content"}}
+<h1>Sign in</h1>
+<p>Both options sign you in with the same Okta account. They differ in protocol, not in identity.</p>
+<div class="cards">
+  <section class="card">
+    <h2>SAML 2.0</h2>
+    <p>XML assertions signed by Okta, posted back through the browser.</p>
+    {{if .Data.SAML}}
+      <a class="button" href="/saml/login">Sign in with SAML</a>
+    {{else}}
+      <p class="muted">Not configured yet (set <code>SAML_IDP_METADATA_URL</code>).</p>
+    {{end}}
+  </section>
+  <section class="card">
+    <h2>OpenID Connect</h2>
+    <p>Authorization code flow with PKCE; Okta returns a signed ID token (JWT).</p>
+    {{if .Data.OIDC}}
+      <a class="button" href="/oidc/login">Sign in with OIDC</a>
+    {{else}}
+      <p class="muted">Not configured yet (set <code>OIDC_ISSUER</code> and <code>OIDC_CLIENT_ID</code>).</p>
+    {{end}}
+  </section>
+</div>
+{{end}}

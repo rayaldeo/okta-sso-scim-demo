@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}} · Okta SSO + SCIM demo</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <a class="brand" href="/">Okta SSO + SCIM demo</a>
+    <nav>
+      {{with .Identity}}
+        <a href="/dashboard">Dashboard</a>
+        {{if eq .Role.String "admin"}}<a href="/admin">Admin</a>{{end}}
+        <span class="who">{{.User.UserName}} · {{.Role}}</span>
+        <form method="post" action="/logout"><button type="submit">Sign out</button></form>
+      {{else}}
+        <a href="/login">Sign in</a>
+      {{end}}
+    </nav>
+  </header>
+  <main>
+    {{template "content" .}}
+  </main>
+  <footer>Demo app. Not for production use. See README for the hardening list.</footer>
+</body>
+</html>

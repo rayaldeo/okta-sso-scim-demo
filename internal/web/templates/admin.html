@@ -1,0 +1,33 @@
+{{define "content"}}
+<h1>Admin</h1>
+
+<h2>Users</h2>
+<table>
+  <thead><tr><th>userName</th><th>Name</th><th>Email</th><th>Active</th><th>Updated</th></tr></thead>
+  <tbody>
+  {{range .Data.Users}}
+    <tr class="{{if not .Active}}inactive{{end}}">
+      <td>{{.UserName}}</td><td>{{.GivenName}} {{.FamilyName}}</td><td>{{.Email}}</td>
+      <td>{{if .Active}}yes{{else}}no{{end}}</td><td>{{fmtTime .Updated}}</td>
+    </tr>
+  {{else}}
+    <tr><td colspan="5" class="muted">No users yet. Assign the app to someone in Okta.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+
+<h2>Audit log <span class="muted">(latest 100)</span></h2>
+<table>
+  <thead><tr><th>Time</th><th>Event</th><th>Actor</th><th>Subject</th><th>Outcome</th><th>Detail</th><th>IP</th></tr></thead>
+  <tbody>
+  {{range .Data.Events}}
+    <tr class="{{.Outcome}}">
+      <td>{{fmtTime .Time}}</td><td><code>{{.Type}}</code></td><td>{{.Actor}}</td>
+      <td>{{.Subject}}</td><td>{{.Outcome}}</td><td><code>{{.Detail}}</code></td><td>{{.IP}}</td>
+    </tr>
+  {{else}}
+    <tr><td colspan="7" class="muted">No events yet.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}

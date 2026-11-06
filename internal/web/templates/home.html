@@ -1,0 +1,15 @@
+{{define "content"}}
+<h1>Okta SSO + SCIM provisioning demo</h1>
+<p>This app uses Okta as its identity provider:</p>
+<ul>
+  <li><strong>Sign-in</strong> with SAML 2.0 or OpenID Connect (authorization code + PKCE).</li>
+  <li><strong>Provisioning</strong>: Okta pushes users and group memberships here over SCIM 2.0.</li>
+  <li><strong>Access</strong> is decided server-side from Okta group membership: <code>admin</code> or <code>viewer</code>.</li>
+  <li><strong>Audit</strong>: sign-ins, provisioning and deprovisioning events are logged.</li>
+</ul>
+{{if .Identity}}
+  <p><a class="button" href="/dashboard">Go to dashboard</a></p>
+{{else}}
+  <p><a class="button" href="/login">Sign in</a></p>
+{{end}}
+{{end}}
