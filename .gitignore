@@ -23,6 +23,9 @@ data/
 coverage.out
 coverage.html
 
+# Local tool settings
+.claude/settings.local.json
+
 # Editors / OS
 .vscode/
 .idea/
