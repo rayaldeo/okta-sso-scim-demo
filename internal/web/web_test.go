@@ -21,9 +21,12 @@ type harness struct {
 	group map[string]*store.Group
 }
 
-func newHarness(t *testing.T) *harness {
+func newHarness(t *testing.T) *harness { return newHarnessWith(t, nil, Options{}) }
+
+// newHarnessWith builds a server from the given environment variables.
+func newHarnessWith(t *testing.T, env map[string]string, opts Options) *harness {
 	t.Helper()
-	cfg, err := config.FromEnv(func(string) string { return "" })
+	cfg, err := config.FromEnv(func(k string) string { return env[k] })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +36,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Cleanup(func() { st.Close() })
 
-	srv, err := New(cfg, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv, err := New(cfg, st, slog.New(slog.NewTextHandler(io.Discard, nil)), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +66,7 @@ func (hs *harness) signIn(userName string, groups ...string) (*store.User, *http
 		}
 	}
 	rec := httptest.NewRecorder()
-	if err := hs.srv.Sessions().Start(ctx, rec, nil, u.ID, "oidc"); err != nil {
+	if err := hs.srv.Sessions().Start(ctx, rec, nil, u.ID, "oidc", ""); err != nil {
 		hs.t.Fatal(err)
 	}
 	cookies := rec.Result().Cookies()

@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rayaldeo/okta-sso-scim-demo/internal/auth"
 	"github.com/rayaldeo/okta-sso-scim-demo/internal/config"
 	"github.com/rayaldeo/okta-sso-scim-demo/internal/store"
 	"github.com/rayaldeo/okta-sso-scim-demo/internal/web"
@@ -36,7 +37,24 @@ func run(log *slog.Logger) error {
 	}
 	defer st.Close()
 
-	srv, err := web.New(cfg, st, log)
+	var opts web.Options
+	if cfg.OIDCEnabled() {
+		// Fail fast: a typo in OIDC_ISSUER should stop startup, not surface
+		// as a broken login later.
+		opts.OIDC, err = auth.NewOIDC(auth.OIDCConfig{
+			Issuer:       cfg.OIDCIssuer,
+			ClientID:     cfg.OIDCClientID,
+			ClientSecret: cfg.OIDCClientSecret,
+			RedirectURL:  cfg.OIDCRedirectURL(),
+			Scopes:       cfg.OIDCScopes,
+		})
+		if err != nil {
+			return err
+		}
+		log.Info("oidc ready", "issuer", cfg.OIDCIssuer, "redirect_uri", cfg.OIDCRedirectURL())
+	}
+
+	srv, err := web.New(cfg, st, log, opts)
 	if err != nil {
 		return err
 	}

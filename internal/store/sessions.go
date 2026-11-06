@@ -14,13 +14,14 @@ type Session struct {
 	AuthMethod string // "saml" or "oidc"
 	Created    time.Time
 	Expires    time.Time
+	IDToken    string // OIDC only: raw ID token, used as id_token_hint at logout
 }
 
 // CreateSession stores a session under tokenHash.
 func (s *Store) CreateSession(ctx context.Context, tokenHash string, sess Session) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions
-		(token_hash, user_id, auth_method, created_ms, expires_ms) VALUES (?, ?, ?, ?, ?)`,
-		tokenHash, sess.UserID, sess.AuthMethod, toMS(sess.Created), toMS(sess.Expires))
+		(token_hash, user_id, auth_method, created_ms, expires_ms, id_token) VALUES (?, ?, ?, ?, ?, ?)`,
+		tokenHash, sess.UserID, sess.AuthMethod, toMS(sess.Created), toMS(sess.Expires), sess.IDToken)
 	return err
 }
 
@@ -28,9 +29,9 @@ func (s *Store) CreateSession(ctx context.Context, tokenHash string, sess Sessio
 func (s *Store) GetSession(ctx context.Context, tokenHash string) (Session, error) {
 	var sess Session
 	var created, expires int64
-	err := s.db.QueryRowContext(ctx, `SELECT user_id, auth_method, created_ms, expires_ms
+	err := s.db.QueryRowContext(ctx, `SELECT user_id, auth_method, created_ms, expires_ms, id_token
 		FROM sessions WHERE token_hash = ? AND expires_ms > ?`, tokenHash, toMS(s.now())).
-		Scan(&sess.UserID, &sess.AuthMethod, &created, &expires)
+		Scan(&sess.UserID, &sess.AuthMethod, &created, &expires, &sess.IDToken)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, ErrNotFound
 	}
@@ -56,11 +57,53 @@ func (s *Store) DeleteSessionsForUser(ctx context.Context, userID string) (int64
 	return res.RowsAffected()
 }
 
-// DeleteExpiredSessions purges expired rows and reports how many.
+// DeleteExpiredSessions purges expired sessions and login requests, and
+// reports how many sessions were removed.
 func (s *Store) DeleteExpiredSessions(ctx context.Context) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE expires_ms <= ?`, toMS(s.now()))
+	now := toMS(s.now())
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM login_requests WHERE expires_ms <= ?`, now); err != nil {
+		return 0, err
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE expires_ms <= ?`, now)
 	if err != nil {
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// LoginRequest is the server-side half of an in-flight OIDC login.
+type LoginRequest struct {
+	Nonce        string
+	PKCEVerifier string
+	Expires      time.Time
+}
+
+// CreateLoginRequest stores an in-flight login under the hash of its state.
+func (s *Store) CreateLoginRequest(ctx context.Context, stateHash string, lr LoginRequest) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO login_requests
+		(state_hash, nonce, pkce_verifier, expires_ms) VALUES (?, ?, ?, ?)`,
+		stateHash, lr.Nonce, lr.PKCEVerifier, toMS(lr.Expires))
+	return err
+}
+
+// ConsumeLoginRequest deletes and returns the login request for stateHash.
+// Because the row is deleted in the same statement, a state value can be
+// used once only; a replayed callback gets ErrNotFound.
+func (s *Store) ConsumeLoginRequest(ctx context.Context, stateHash string) (LoginRequest, error) {
+	var lr LoginRequest
+	var expires int64
+	err := s.db.QueryRowContext(ctx, `DELETE FROM login_requests WHERE state_hash = ?
+		RETURNING nonce, pkce_verifier, expires_ms`, stateHash).
+		Scan(&lr.Nonce, &lr.PKCEVerifier, &expires)
+	if errors.Is(err, sql.ErrNoRows) {
+		return LoginRequest{}, ErrNotFound
+	}
+	if err != nil {
+		return LoginRequest{}, err
+	}
+	lr.Expires = fromMS(expires)
+	if !lr.Expires.After(s.now()) {
+		return LoginRequest{}, ErrNotFound
+	}
+	return lr, nil
 }

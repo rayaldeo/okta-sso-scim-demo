@@ -114,6 +114,74 @@ func TestGroupMembership(t *testing.T) {
 	}
 }
 
+func TestSetUserGroupsReplacesMembership(t *testing.T) {
+	s, ctx := newTestStore(t), context.Background()
+	u := &User{UserName: "hal@example.com", Active: true}
+	_ = s.CreateUser(ctx, u)
+
+	if err := s.SetUserGroups(ctx, u.ID, []string{"app-admin", "app-viewer"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetUserGroups(ctx, u.ID, []string{"app-viewer"}); err != nil {
+		t.Fatal(err)
+	}
+	names, _ := s.GroupNamesForUser(ctx, u.ID)
+	if len(names) != 1 || names[0] != "app-viewer" {
+		t.Fatalf("got %v, want [app-viewer]", names)
+	}
+}
+
+func TestLoginRequestIsSingleUse(t *testing.T) {
+	s, ctx := newTestStore(t), context.Background()
+	now := time.Now()
+	s.SetClock(func() time.Time { return now })
+
+	_ = s.CreateLoginRequest(ctx, "st", LoginRequest{Nonce: "n", PKCEVerifier: "v", Expires: now.Add(time.Minute)})
+	got, err := s.ConsumeLoginRequest(ctx, "st")
+	if err != nil || got.Nonce != "n" || got.PKCEVerifier != "v" {
+		t.Fatalf("first consume: %+v %v", got, err)
+	}
+	if _, err := s.ConsumeLoginRequest(ctx, "st"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("replay should be ErrNotFound, got %v", err)
+	}
+
+	_ = s.CreateLoginRequest(ctx, "old", LoginRequest{Nonce: "n", PKCEVerifier: "v", Expires: now.Add(time.Minute)})
+	s.SetClock(func() time.Time { return now.Add(2 * time.Minute) })
+	if _, err := s.ConsumeLoginRequest(ctx, "old"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expired request should be ErrNotFound, got %v", err)
+	}
+}
+
+func TestMigrationAddsIDTokenColumn(t *testing.T) {
+	path := t.TempDir() + "/old.db"
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a database from before the id_token column existed.
+	if _, err := s.db.Exec(`ALTER TABLE sessions DROP COLUMN id_token`); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+
+	s, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen should migrate: %v", err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	u := &User{UserName: "ivy@example.com", Active: true}
+	_ = s.CreateUser(ctx, u)
+	now := time.Now()
+	if err := s.CreateSession(ctx, "h", Session{UserID: u.ID, AuthMethod: "oidc", Created: now,
+		Expires: now.Add(time.Hour), IDToken: "tok"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetSession(ctx, "h"); got.IDToken != "tok" {
+		t.Fatalf("id_token not persisted: %+v", got)
+	}
+}
+
 func TestAuditNewestFirst(t *testing.T) {
 	s, ctx := newTestStore(t), context.Background()
 	for _, typ := range []string{"a", "b", "c"} {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rayaldeo/okta-sso-scim-demo/internal/audit"
+	"github.com/rayaldeo/okta-sso-scim-demo/internal/auth"
 	"github.com/rayaldeo/okta-sso-scim-demo/internal/config"
 	"github.com/rayaldeo/okta-sso-scim-demo/internal/rbac"
 	"github.com/rayaldeo/okta-sso-scim-demo/internal/session"
@@ -19,6 +20,12 @@ import (
 
 //go:embed templates/*.html static/*
 var assets embed.FS
+
+// Options are optional components. A nil protocol client disables that
+// sign-in method.
+type Options struct {
+	OIDC *auth.OIDC
+}
 
 // Server holds the app's dependencies.
 type Server struct {
@@ -29,10 +36,11 @@ type Server struct {
 	roles    rbac.Mapping
 	log      *slog.Logger
 	pages    map[string]*template.Template
+	oidc     *auth.OIDC
 }
 
 // New builds a Server and parses its templates.
-func New(cfg config.Config, st *store.Store, log *slog.Logger) (*Server, error) {
+func New(cfg config.Config, st *store.Store, log *slog.Logger, opts Options) (*Server, error) {
 	s := &Server{
 		cfg:      cfg,
 		store:    st,
@@ -41,6 +49,7 @@ func New(cfg config.Config, st *store.Store, log *slog.Logger) (*Server, error) 
 		roles:    rbac.Mapping{AdminGroup: cfg.AdminGroup, ViewerGroup: cfg.ViewerGroup},
 		log:      log,
 		pages:    map[string]*template.Template{},
+		oidc:     opts.OIDC,
 	}
 	funcs := template.FuncMap{
 		"fmtTime": func(t time.Time) string { return t.Format("2006-01-02 15:04:05 MST") },
@@ -78,8 +87,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /dashboard", s.requireRole(rbac.RoleViewer, http.HandlerFunc(s.handleDashboard)))
 	mux.Handle("GET /admin", s.requireRole(rbac.RoleAdmin, http.HandlerFunc(s.handleAdmin)))
 
+	if s.oidc != nil {
+		mux.HandleFunc("GET /oidc/login", s.handleOIDCLogin)
+		mux.HandleFunc("GET /oidc/callback", s.handleOIDCCallback)
+	}
+
 	// Later steps register here:
-	//   /oidc/login, /oidc/callback            (step 3)
 	//   /saml/metadata, /saml/acs, /saml/slo   (step 4)
 	//   /scim/v2/Users, /scim/v2/Groups        (steps 5-6, bearer token, no session)
 

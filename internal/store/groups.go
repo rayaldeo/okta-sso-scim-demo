@@ -42,6 +42,37 @@ func (s *Store) RemoveGroupMember(ctx context.Context, groupID, userID string) e
 	return err
 }
 
+// SetUserGroups makes userID a member of exactly the named groups, creating
+// any group that doesn't exist yet. Used for JIT provisioning, where the
+// groups claim in the login token is the source of truth at sign-in.
+func (s *Store) SetUserGroups(ctx context.Context, userID string, names []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM group_members WHERE user_id = ?`, userID); err != nil {
+		return err
+	}
+	now := toMS(s.now())
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO groups
+			(id, external_id, display_name, created_ms, updated_ms) VALUES (?, '', ?, ?, ?)`,
+			newID(), name, now, now); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO group_members (group_id, user_id)
+			SELECT id, ? FROM groups WHERE display_name = ?`, userID, name); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // GroupNamesForUser returns the display names of every group userID belongs to.
 func (s *Store) GroupNamesForUser(ctx context.Context, userID string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT g.display_name FROM groups g

@@ -59,7 +59,40 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	if err := s.migrate(context.Background()); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	return s, nil
+}
+
+// migrate applies additive changes to databases created by older versions.
+func (s *Store) migrate(ctx context.Context) error {
+	return s.addColumnIfMissing(ctx, "sessions", "id_token", "TEXT NOT NULL DEFAULT ''")
+}
+
+func (s *Store) addColumnIfMissing(ctx context.Context, table, column, decl string) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+	// table/column/decl are constants from this file, never user input.
+	_, err = s.db.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, decl))
+	return err
 }
 
 // Close closes the database.
@@ -105,9 +138,20 @@ CREATE TABLE IF NOT EXISTS sessions (
 	user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 	auth_method TEXT NOT NULL,
 	created_ms  INTEGER NOT NULL,
-	expires_ms  INTEGER NOT NULL
+	expires_ms  INTEGER NOT NULL,
+	-- Kept only to send as id_token_hint on OIDC logout.
+	id_token    TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+-- In-flight OIDC logins: state (hashed) -> nonce + PKCE verifier. Single use,
+-- deleted on callback, expire after a few minutes.
+CREATE TABLE IF NOT EXISTS login_requests (
+	state_hash    TEXT PRIMARY KEY,
+	nonce         TEXT NOT NULL,
+	pkce_verifier TEXT NOT NULL,
+	expires_ms    INTEGER NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS audit_events (
 	id         INTEGER PRIMARY KEY AUTOINCREMENT,

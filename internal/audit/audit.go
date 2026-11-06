@@ -16,6 +16,7 @@ import (
 const (
 	LoginSuccess     = "login.success"
 	LoginFailure     = "login.failure"
+	JITProvision     = "login.jit_provision"
 	Logout           = "logout"
 	AccessDenied     = "authz.denied"
 	SessionRevoked   = "session.revoked"

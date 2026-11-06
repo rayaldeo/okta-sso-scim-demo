@@ -85,6 +85,25 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	return out, rows.Err()
 }
 
+// UpdateUserProfile overwrites u's mutable attributes (everything except ID,
+// userName, active and timestamps) and bumps its version.
+func (s *Store) UpdateUserProfile(ctx context.Context, u *User) error {
+	now := s.now().UTC()
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET external_id = ?, given_name = ?,
+		family_name = ?, display_name = ?, email = ?, updated_ms = ?, version = version + 1
+		WHERE id = ?`,
+		u.ExternalID, u.GivenName, u.FamilyName, u.DisplayName, u.Email, toMS(now), u.ID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	u.Updated = now
+	u.Version++
+	return nil
+}
+
 // SetUserActive activates or deactivates a user. Deactivating a user also
 // deletes all of their sessions in the same transaction, so access ends
 // immediately rather than when the session would have expired.

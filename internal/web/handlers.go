@@ -42,22 +42,30 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, r, http.StatusOK, "login", "Sign in", map[string]any{
-		"OIDC": s.cfg.OIDCEnabled(),
+		"OIDC": s.oidc != nil,
 		"SAML": s.cfg.SAMLEnabled(),
 	})
 }
 
-// handleLogout ends the local session. Steps 3-4 extend this to also end the
-// Okta session (OIDC RP-initiated logout / SAML Single Logout).
+// handleLogout ends the local session first, then (for OIDC) sends the
+// browser to Okta's end-session endpoint so the Okta session ends too;
+// otherwise the next "Sign in" would silently succeed without a password.
 // It is POST-only: combined with SameSite=Lax cookies, other sites can't log
 // a user out by embedding a link or image.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	sess, _ := s.sessions.Current(r)
 	if id := identityFrom(r.Context()); id != nil {
 		s.audit.Record(r.Context(), r, audit.Logout, id.User.UserName, id.User.UserName, audit.Success,
 			map[string]any{"method": id.AuthMethod})
 	}
 	if err := s.sessions.End(w, r); err != nil {
 		s.log.Error("end session", "err", err)
+	}
+	if sess.AuthMethod == "oidc" && s.oidc != nil {
+		if u := s.oidc.LogoutURL(sess.IDToken, s.cfg.PostLogoutRedirectURL()); u != "" {
+			http.Redirect(w, r, u, http.StatusSeeOther)
+			return
+		}
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }

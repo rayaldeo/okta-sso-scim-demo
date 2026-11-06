@@ -45,7 +45,8 @@ func (m *Manager) CookieName() string {
 
 // Start creates a new session for userID and sets the cookie. Any session the
 // request already carried is destroyed first (prevents session fixation).
-func (m *Manager) Start(ctx context.Context, w http.ResponseWriter, r *http.Request, userID, method string) error {
+// idToken is the raw OIDC ID token ("" for SAML), kept for logout.
+func (m *Manager) Start(ctx context.Context, w http.ResponseWriter, r *http.Request, userID, method, idToken string) error {
 	if r != nil {
 		if c, err := r.Cookie(m.CookieName()); err == nil {
 			_ = m.store.DeleteSession(ctx, hashToken(c.Value))
@@ -61,7 +62,7 @@ func (m *Manager) Start(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	expires := now.Add(m.ttl)
 
 	if err := m.store.CreateSession(ctx, hashToken(token), store.Session{
-		UserID: userID, AuthMethod: method, Created: now, Expires: expires,
+		UserID: userID, AuthMethod: method, Created: now, Expires: expires, IDToken: idToken,
 	}); err != nil {
 		return err
 	}

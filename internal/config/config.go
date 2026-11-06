@@ -23,9 +23,15 @@ type Config struct {
 	AdminGroup  string
 	ViewerGroup string
 
+	// JITProvisioning lets a first sign-in create the local user and set its
+	// groups from the login token. Turn it off once SCIM is the only way
+	// accounts get into the app.
+	JITProvisioning bool
+
 	OIDCIssuer       string
 	OIDCClientID     string
 	OIDCClientSecret string
+	OIDCScopes       []string
 
 	SAMLIdPMetadataURL string
 	SAMLCertFile       string
@@ -78,7 +84,14 @@ func FromEnv(get func(string) string) (Config, error) {
 		return Config{}, fmt.Errorf("SESSION_TTL must be a positive duration like 8h: %q", get("SESSION_TTL"))
 	}
 
+	jit, err := parseBool(or("JIT_PROVISIONING", "true"))
+	if err != nil {
+		return Config{}, fmt.Errorf("JIT_PROVISIONING: %w", err)
+	}
+
 	c := Config{
+		JITProvisioning:    jit,
+		OIDCScopes:         strings.Fields(or("OIDC_SCOPES", "openid profile email groups")),
 		ListenAddr:         or("LISTEN_ADDR", ":8080"),
 		BaseURL:            base,
 		DBPath:             or("DB_PATH", "data/app.db"),
@@ -100,7 +113,35 @@ func FromEnv(get func(string) string) (Config, error) {
 	if c.AdminGroup == c.ViewerGroup {
 		return Config{}, errors.New("ROLE_ADMIN_GROUP and ROLE_VIEWER_GROUP must differ")
 	}
+	if c.OIDCEnabled() && !contains(c.OIDCScopes, "openid") {
+		return Config{}, errors.New("OIDC_SCOPES must include openid")
+	}
 	return c, nil
+}
+
+// OIDCRedirectURL is the callback URL to register in Okta.
+func (c Config) OIDCRedirectURL() string { return c.BaseURL.String() + "/oidc/callback" }
+
+// PostLogoutRedirectURL is where Okta sends the browser after sign-out.
+func (c Config) PostLogoutRedirectURL() string { return c.BaseURL.String() + "/" }
+
+func parseBool(s string) (bool, error) {
+	switch strings.ToLower(s) {
+	case "true", "1", "yes":
+		return true, nil
+	case "false", "0", "no":
+		return false, nil
+	}
+	return false, fmt.Errorf("want true or false, got %q", s)
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 // loadDotEnv sets variables from a KEY=VALUE file without overriding

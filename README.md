@@ -13,7 +13,7 @@ A small Go web app that uses **Okta** as its identity provider:
 ## Roadmap
 
 - [x] App skeleton: config, SQLite store, server-side sessions, RBAC, audit log, tests, CI
-- [ ] OIDC sign-in (auth code + PKCE) and RP-initiated logout
+- [x] OIDC sign-in (auth code + PKCE), JIT provisioning, RP-initiated logout ([Okta setup](docs/okta-setup.md))
 - [ ] SAML SP: metadata, ACS with signed-assertion validation, attribute mapping, Single Logout
 - [ ] SCIM `/Users`: create, get, filter by `userName`, PUT, PATCH, deactivate
 - [ ] SCIM `/Groups`: create, PATCH members, rename, delete
@@ -39,6 +39,9 @@ Open http://localhost:8080.
 - **Roles are recomputed on every request** from group membership that SCIM keeps current, so removing someone from a group in Okta takes effect on their next click rather than at their next login.
 - **Deactivation deletes sessions in the same transaction** as the `active=false` update.
 - **Deny by default.** Users in neither mapped group can sign in but can't reach any protected page.
+- **OIDC is the authorization code flow with PKCE (S256) plus a client secret.** `state` is bound to the browser by a short-lived cookie *and* to a single-use server-side row holding the nonce and PKCE verifier, so callbacks can't be forged, replayed or injected (login CSRF). The ID token's signature, issuer, audience, expiry and nonce are all verified.
+- **Two provisioning modes.** `JIT_PROVISIONING=true`: the first sign-in creates the user and each sign-in refreshes groups from the token (a *missing* groups claim never strips roles). `false`: only SCIM can create users or change groups; a login token can't create or elevate an account.
+- **Logout ends the Okta session too** (RP-initiated logout with `id_token_hint`), otherwise the next sign-in would succeed silently.
 - **Pure-Go SQLite** (`modernc.org/sqlite`), so no C toolchain is needed on Windows or in the container.
 
 ## License
