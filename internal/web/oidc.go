@@ -87,6 +87,9 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		s.loginFailed(w, r, "oidc", "", err)
 		return
 	}
+	if claims.UserInfoErr != nil {
+		s.log.Warn("oidc userinfo unavailable; using id token claims only", "err", claims.UserInfoErr)
+	}
 
 	userName := claims.PreferredUsername
 	if userName == "" {

@@ -30,11 +30,17 @@ All URLs below assume `BASE_URL=http://localhost:8080`. If you change
    - Tick **Require PKCE as additional verification** → **Save**
    - Copy the **Client ID** and **Client secret** into `.env`
      (`OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`).
-4. **Sign On** tab → **OpenID Connect ID Token → Edit**
+4. **Sign On** tab → **OpenID Connect ID Token** → **Show legacy configuration**
+   → **Group Claims → Edit**
    - Groups claim type: **Filter**
    - Groups claim filter: name `groups`, **Starts with** `app-`
    - **Save**. Without this, the ID token carries no `groups` claim and every
-     user gets the `none` role.
+     user gets the `none` role. (Okta's newer "Token claims → Add expression"
+     UI above it can do the same thing; the legacy filter is simpler.)
+
+   Note: in the New Web App Integration form, choose **Use Okta-generated
+   client ID** under *Client definition*, and clear Okta's default
+   "My Web App" text from the name field.
 5. Set `OIDC_ISSUER` in `.env` to your Okta org URL, e.g.
    `https://integrator-1234567.okta.com` (no trailing slash). This uses Okta's
    *org authorization server*, which is what the app-level groups claim

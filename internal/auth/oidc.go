@@ -30,6 +30,7 @@ type OIDC struct {
 	ctx        context.Context // carries the HTTP client used for discovery, JWKS and token calls
 	oauth      oauth2.Config
 	verifier   *oidc.IDTokenVerifier
+	provider   *oidc.Provider
 	endSession string
 }
 
@@ -66,6 +67,7 @@ func NewOIDC(cfg OIDCConfig) (*OIDC, error) {
 		// Verifies signature (against the IdP's JWKS), issuer, audience
 		// (must contain our client ID) and expiry. Only RS256 is accepted.
 		verifier:   provider.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
+		provider:   provider,
 		endSession: meta.EndSession,
 	}, nil
 }
@@ -111,10 +113,32 @@ type Claims struct {
 	Groups            []string
 	HasGroupsClaim    bool   // false if Okta sent no groups claim at all
 	RawIDToken        string // kept for id_token_hint at logout
+
+	// UserInfoErr is set when the userinfo call failed. Sign-in still
+	// proceeds on the verified ID token; only optional profile fields
+	// (e.g. given/family name) may be missing.
+	UserInfoErr error
 }
 
-// ErrNonceMismatch means the ID token was not issued for this login.
-var ErrNonceMismatch = errors.New("id token nonce does not match")
+var (
+	// ErrNonceMismatch means the ID token was not issued for this login.
+	ErrNonceMismatch = errors.New("id token nonce does not match")
+	// ErrUserInfoSubject means userinfo described a different user than the
+	// ID token. OIDC Core 5.3.2 requires rejecting the response; a mismatch
+	// points to a token substitution or a misbehaving endpoint.
+	ErrUserInfoSubject = errors.New("userinfo sub does not match id token sub")
+)
+
+// profileClaims are the standard claims read from both the ID token and the
+// userinfo response.
+type profileClaims struct {
+	Email             string `json:"email"`
+	EmailVerified     bool   `json:"email_verified"`
+	Name              string `json:"name"`
+	GivenName         string `json:"given_name"`
+	FamilyName        string `json:"family_name"`
+	PreferredUsername string `json:"preferred_username"`
+}
 
 // Exchange swaps the authorization code for tokens (sending the PKCE
 // verifier and client secret), then verifies the ID token and its nonce.
@@ -138,31 +162,64 @@ func (o *OIDC) Exchange(ctx context.Context, code, pkceVerifier, nonce string) (
 	}
 
 	var c struct {
-		Email             string    `json:"email"`
-		EmailVerified     bool      `json:"email_verified"`
-		Name              string    `json:"name"`
-		GivenName         string    `json:"given_name"`
-		FamilyName        string    `json:"family_name"`
-		PreferredUsername string    `json:"preferred_username"`
-		Groups            *[]string `json:"groups"`
+		profileClaims
+		Groups *[]string `json:"groups"`
 	}
 	if err := idt.Claims(&c); err != nil {
 		return Claims{}, fmt.Errorf("decode claims: %w", err)
 	}
-	out := Claims{
-		Subject:           idt.Subject,
-		PreferredUsername: c.PreferredUsername,
-		Email:             c.Email,
-		EmailVerified:     c.EmailVerified,
-		Name:              c.Name,
-		GivenName:         c.GivenName,
-		FamilyName:        c.FamilyName,
-		RawIDToken:        raw,
-	}
+	out := Claims{Subject: idt.Subject, RawIDToken: raw}
+	out.applyProfile(c.profileClaims)
 	if c.Groups != nil {
 		out.Groups, out.HasGroupsClaim = *c.Groups, true
 	}
+
+	// Okta's org authorization server issues "thin" ID tokens: name, email
+	// and preferred_username, but not given_name/family_name. The full
+	// profile comes from the userinfo endpoint, called with the access token.
+	if tok.AccessToken != "" {
+		if err := o.mergeUserInfo(ctx, tok, &out); err != nil {
+			if errors.Is(err, ErrUserInfoSubject) {
+				return Claims{}, err
+			}
+			out.UserInfoErr = err
+		}
+	}
 	return out, nil
+}
+
+// mergeUserInfo fills fields the ID token left empty. It never overrides a
+// value from the signed ID token, and never takes groups from userinfo:
+// the ID token is the verified source for anything security-relevant.
+func (o *OIDC) mergeUserInfo(ctx context.Context, tok *oauth2.Token, out *Claims) error {
+	ui, err := o.provider.UserInfo(ctx, oauth2.StaticTokenSource(tok))
+	if err != nil {
+		return fmt.Errorf("userinfo: %w", err)
+	}
+	if subtle.ConstantTimeCompare([]byte(ui.Subject), []byte(out.Subject)) != 1 {
+		return ErrUserInfoSubject
+	}
+	var p profileClaims
+	if err := ui.Claims(&p); err != nil {
+		return fmt.Errorf("decode userinfo: %w", err)
+	}
+	fill := func(dst *string, v string) {
+		if *dst == "" {
+			*dst = v
+		}
+	}
+	fill(&out.Email, p.Email)
+	fill(&out.Name, p.Name)
+	fill(&out.GivenName, p.GivenName)
+	fill(&out.FamilyName, p.FamilyName)
+	fill(&out.PreferredUsername, p.PreferredUsername)
+	return nil
+}
+
+func (c *Claims) applyProfile(p profileClaims) {
+	c.Email, c.EmailVerified = p.Email, p.EmailVerified
+	c.Name, c.GivenName, c.FamilyName = p.Name, p.GivenName, p.FamilyName
+	c.PreferredUsername = p.PreferredUsername
 }
 
 // LogoutURL returns the IdP's RP-initiated logout URL, or "" if the IdP

@@ -32,8 +32,9 @@ type fakeIdP struct {
 	clientID string
 	secret   string
 
-	mu     sync.Mutex
-	grants map[string]grant // authorization code -> grant
+	mu       sync.Mutex
+	grants   map[string]grant // authorization code -> grant
+	userinfo map[string]grant // access token -> grant
 }
 
 // grant is what the IdP remembers between /authorize and /token, plus knobs
@@ -44,6 +45,8 @@ type grant struct {
 	signWith                      *rsa.PrivateKey // nil = the real key
 	nonceOverride                 string
 	ttl                           time.Duration
+	userinfoClaims                map[string]any // nil = same as claims
+	userinfoDown                  bool           // userinfo returns 500
 }
 
 func newFakeIdP(t *testing.T) *fakeIdP {
@@ -52,7 +55,8 @@ func newFakeIdP(t *testing.T) *fakeIdP {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeIdP{t: t, key: key, clientID: "test-client", secret: "test-secret", grants: map[string]grant{}}
+	f := &fakeIdP{t: t, key: key, clientID: "test-client", secret: "test-secret",
+		grants: map[string]grant{}, userinfo: map[string]grant{}}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
@@ -62,6 +66,7 @@ func newFakeIdP(t *testing.T) *fakeIdP {
 			"token_endpoint":                        f.srv.URL + "/token",
 			"jwks_uri":                              f.srv.URL + "/keys",
 			"end_session_endpoint":                  f.srv.URL + "/logout",
+			"userinfo_endpoint":                     f.srv.URL + "/userinfo",
 			"id_token_signing_alg_values_supported": []string{"RS256"},
 		})
 	})
@@ -71,6 +76,24 @@ func newFakeIdP(t *testing.T) *fakeIdP {
 		}})
 	})
 	mux.HandleFunc("POST /token", f.handleToken)
+	mux.HandleFunc("GET /userinfo", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		g, ok := f.userinfo[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
+		f.mu.Unlock()
+		switch {
+		case !ok:
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		case g.userinfoDown:
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		claims := g.userinfoClaims
+		if claims == nil {
+			claims = g.claims
+		}
+		writeJSON(w, claims)
+	})
 	f.srv = httptest.NewServer(mux)
 	t.Cleanup(f.srv.Close)
 	return f
@@ -147,8 +170,12 @@ func (f *fakeIdP) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	at := fmt.Sprintf("at-%d", time.Now().UnixNano())
+	f.mu.Lock()
+	f.userinfo[at] = g
+	f.mu.Unlock()
 	writeJSON(w, map[string]any{
-		"access_token": "at", "token_type": "Bearer", "expires_in": 3600,
+		"access_token": at, "token_type": "Bearer", "expires_in": 3600,
 		"id_token": f.idToken(g),
 	})
 }
@@ -383,6 +410,73 @@ func TestOIDCRejectsBadCallbacks(t *testing.T) {
 				t.Fatal("a rejected login still created a user")
 			}
 		})
+	}
+}
+
+// thinToken mimics Okta's org authorization server: the ID token omits
+// given_name and family_name, which only userinfo returns.
+func thinToken(full map[string]any) map[string]any {
+	thin := map[string]any{}
+	for k, v := range full {
+		if k != "given_name" && k != "family_name" {
+			thin[k] = v
+		}
+	}
+	return thin
+}
+
+func TestOIDCUserInfoFillsThinIDToken(t *testing.T) {
+	hs, f := newOIDCHarness(t, nil)
+	full := oktaUser("ida@example.com", "app-viewer")
+	full["given_name"], full["family_name"] = "Ida", "Lovelace"
+
+	res := hs.login(f, grant{claims: thinToken(full), userinfoClaims: full})
+	if res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("callback = %d", res.StatusCode)
+	}
+	u, _ := hs.st.GetUserByUserName(context.Background(), "ida@example.com")
+	if u.GivenName != "Ida" || u.FamilyName != "Lovelace" {
+		t.Fatalf("names not filled from userinfo: %q %q", u.GivenName, u.FamilyName)
+	}
+}
+
+func TestOIDCUserInfoNeverOverridesIDToken(t *testing.T) {
+	hs, f := newOIDCHarness(t, nil)
+	idClaims := oktaUser("jo@example.com", "app-viewer")
+	ui := oktaUser("jo@example.com", "app-admin") // userinfo claims admin
+	ui["email"] = "attacker@example.com"
+
+	res := hs.login(f, grant{claims: idClaims, userinfoClaims: ui})
+	sid := cookieNamed(res, "sid")
+	u, _ := hs.st.GetUserByUserName(context.Background(), "jo@example.com")
+	if u.Email != "jo@example.com" {
+		t.Fatalf("userinfo overrode the ID token's email: %q", u.Email)
+	}
+	if r := hs.do("GET", "/admin", sid); r.StatusCode != http.StatusForbidden {
+		t.Fatalf("groups taken from userinfo: admin = %d, want 403", r.StatusCode)
+	}
+}
+
+func TestOIDCUserInfoSubjectMismatchRejected(t *testing.T) {
+	hs, f := newOIDCHarness(t, nil)
+	other := oktaUser("x@example.com", "app-admin")
+	other["sub"] = "00usomeoneelse"
+
+	res := hs.login(f, grant{claims: oktaUser("x@example.com", "app-admin"), userinfoClaims: other})
+	if res.StatusCode != http.StatusBadRequest || cookieNamed(res, "sid") != nil {
+		t.Fatalf("userinfo for another subject: status %d, want 400 and no session", res.StatusCode)
+	}
+	if e := lastAudit(t, hs.st, "login.failure"); !strings.Contains(e.Detail, "userinfo sub") {
+		t.Fatalf("audit detail = %s", e.Detail)
+	}
+}
+
+func TestOIDCUserInfoOutageDoesNotBlockSignIn(t *testing.T) {
+	hs, f := newOIDCHarness(t, nil)
+	full := oktaUser("kai@example.com", "app-viewer")
+	res := hs.login(f, grant{claims: thinToken(full), userinfoDown: true})
+	if res.StatusCode != http.StatusSeeOther || cookieNamed(res, "sid") == nil {
+		t.Fatalf("userinfo outage blocked sign-in: %d", res.StatusCode)
 	}
 }
 
