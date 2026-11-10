@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/rayaldeo/okta-sso-scim-demo/internal/config"
+	"github.com/rayaldeo/okta-sso-scim-demo/internal/session"
 	"github.com/rayaldeo/okta-sso-scim-demo/internal/store"
 )
 
@@ -25,6 +26,11 @@ func newHarness(t *testing.T) *harness { return newHarnessWith(t, nil, Options{}
 
 // newHarnessWith builds a server from the given environment variables.
 func newHarnessWith(t *testing.T, env map[string]string, opts Options) *harness {
+	return newHarnessFn(t, env, func(*store.Store) Options { return opts })
+}
+
+// newHarnessFn is newHarnessWith for options that need the store.
+func newHarnessFn(t *testing.T, env map[string]string, mkOpts func(*store.Store) Options) *harness {
 	t.Helper()
 	cfg, err := config.FromEnv(func(k string) string { return env[k] })
 	if err != nil {
@@ -36,7 +42,7 @@ func newHarnessWith(t *testing.T, env map[string]string, opts Options) *harness 
 	}
 	t.Cleanup(func() { st.Close() })
 
-	srv, err := New(cfg, st, slog.New(slog.NewTextHandler(io.Discard, nil)), opts)
+	srv, err := New(cfg, st, slog.New(slog.NewTextHandler(io.Discard, nil)), mkOpts(st))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +72,7 @@ func (hs *harness) signIn(userName string, groups ...string) (*store.User, *http
 		}
 	}
 	rec := httptest.NewRecorder()
-	if err := hs.srv.Sessions().Start(ctx, rec, nil, u.ID, "oidc", ""); err != nil {
+	if err := hs.srv.Sessions().Start(ctx, rec, nil, session.Login{UserID: u.ID, Method: "oidc"}); err != nil {
 		hs.t.Fatal(err)
 	}
 	cookies := rec.Result().Cookies()

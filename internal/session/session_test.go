@@ -32,7 +32,7 @@ func setup(t *testing.T, secure bool) (*Manager, *store.Store, string) {
 func startSession(t *testing.T, m *Manager, r *http.Request, userID string) *http.Cookie {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	if err := m.Start(context.Background(), rec, r, userID, "oidc", ""); err != nil {
+	if err := m.Start(context.Background(), rec, r, Login{UserID: userID, Method: "oidc"}); err != nil {
 		t.Fatal(err)
 	}
 	cookies := rec.Result().Cookies()

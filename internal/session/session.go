@@ -43,10 +43,20 @@ func (m *Manager) CookieName() string {
 	return "sid"
 }
 
-// Start creates a new session for userID and sets the cookie. Any session the
-// request already carried is destroyed first (prevents session fixation).
-// idToken is the raw OIDC ID token ("" for SAML), kept for logout.
-func (m *Manager) Start(ctx context.Context, w http.ResponseWriter, r *http.Request, userID, method, idToken string) error {
+// Login describes a completed sign-in.
+type Login struct {
+	UserID string
+	Method string // "oidc" or "saml"
+
+	// Kept so logout can also end the IdP session.
+	IDToken          string // OIDC: sent as id_token_hint
+	SAMLNameID       string // SAML: names the user in the LogoutRequest
+	SAMLSessionIndex string // SAML: names the IdP session to end
+}
+
+// Start creates a new session and sets the cookie. Any session the request
+// already carried is destroyed first (prevents session fixation).
+func (m *Manager) Start(ctx context.Context, w http.ResponseWriter, r *http.Request, l Login) error {
 	if r != nil {
 		if c, err := r.Cookie(m.CookieName()); err == nil {
 			_ = m.store.DeleteSession(ctx, hashToken(c.Value))
@@ -62,7 +72,8 @@ func (m *Manager) Start(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	expires := now.Add(m.ttl)
 
 	if err := m.store.CreateSession(ctx, hashToken(token), store.Session{
-		UserID: userID, AuthMethod: method, Created: now, Expires: expires, IDToken: idToken,
+		UserID: l.UserID, AuthMethod: l.Method, Created: now, Expires: expires, IDToken: l.IDToken,
+		SAMLNameID: l.SAMLNameID, SAMLSessionIndex: l.SAMLSessionIndex,
 	}); err != nil {
 		return err
 	}

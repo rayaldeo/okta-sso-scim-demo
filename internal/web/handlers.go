@@ -43,7 +43,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	s.render(w, r, http.StatusOK, "login", "Sign in", map[string]any{
 		"OIDC": s.oidc != nil,
-		"SAML": s.cfg.SAMLEnabled(),
+		"SAML": s.saml != nil,
 	})
 }
 
@@ -63,6 +63,12 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	if sess.AuthMethod == "oidc" && s.oidc != nil {
 		if u := s.oidc.LogoutURL(sess.IDToken, s.cfg.PostLogoutRedirectURL()); u != "" {
+			http.Redirect(w, r, u, http.StatusSeeOther)
+			return
+		}
+	}
+	if sess.AuthMethod == "saml" && s.saml != nil {
+		if u := s.samlLogoutURL(r, sess.SAMLNameID, sess.SAMLSessionIndex); u != "" {
 			http.Redirect(w, r, u, http.StatusSeeOther)
 			return
 		}

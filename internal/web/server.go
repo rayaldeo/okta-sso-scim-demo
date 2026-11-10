@@ -25,6 +25,7 @@ var assets embed.FS
 // sign-in method.
 type Options struct {
 	OIDC *auth.OIDC
+	SAML *auth.SAML
 }
 
 // Server holds the app's dependencies.
@@ -37,6 +38,7 @@ type Server struct {
 	log      *slog.Logger
 	pages    map[string]*template.Template
 	oidc     *auth.OIDC
+	saml     *auth.SAML
 }
 
 // New builds a Server and parses its templates.
@@ -50,6 +52,7 @@ func New(cfg config.Config, st *store.Store, log *slog.Logger, opts Options) (*S
 		log:      log,
 		pages:    map[string]*template.Template{},
 		oidc:     opts.OIDC,
+		saml:     opts.SAML,
 	}
 	funcs := template.FuncMap{
 		"fmtTime": func(t time.Time) string { return t.Format("2006-01-02 15:04:05 MST") },
@@ -92,8 +95,15 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("GET /oidc/callback", s.handleOIDCCallback)
 	}
 
+	if s.saml != nil {
+		mux.HandleFunc("GET /saml/metadata", s.handleSAMLMetadata)
+		mux.HandleFunc("GET /saml/login", s.handleSAMLLogin)
+		mux.HandleFunc("POST /saml/acs", s.handleSAMLACS)
+		mux.HandleFunc("GET /saml/slo", s.handleSAMLSLO)
+		mux.HandleFunc("POST /saml/slo", s.handleSAMLSLO)
+	}
+
 	// Later steps register here:
-	//   /saml/metadata, /saml/acs, /saml/slo   (step 4)
 	//   /scim/v2/Users, /scim/v2/Groups        (steps 5-6, bearer token, no session)
 
 	return s.logRequests(securityHeaders(s.loadIdentity(mux)))

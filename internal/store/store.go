@@ -68,7 +68,16 @@ func Open(path string) (*Store, error) {
 
 // migrate applies additive changes to databases created by older versions.
 func (s *Store) migrate(ctx context.Context) error {
-	return s.addColumnIfMissing(ctx, "sessions", "id_token", "TEXT NOT NULL DEFAULT ''")
+	for _, c := range []struct{ table, column, decl string }{
+		{"sessions", "id_token", "TEXT NOT NULL DEFAULT ''"},
+		{"sessions", "saml_name_id", "TEXT NOT NULL DEFAULT ''"},
+		{"sessions", "saml_session_index", "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := s.addColumnIfMissing(ctx, c.table, c.column, c.decl); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) addColumnIfMissing(ctx context.Context, table, column, decl string) error {
@@ -151,6 +160,23 @@ CREATE TABLE IF NOT EXISTS login_requests (
 	nonce         TEXT NOT NULL,
 	pkce_verifier TEXT NOT NULL,
 	expires_ms    INTEGER NOT NULL
+);
+
+-- In-flight SAML messages: RelayState (hashed) -> the ID of the AuthnRequest
+-- or LogoutRequest we sent, so the response's InResponseTo can be checked.
+-- Single use.
+CREATE TABLE IF NOT EXISTS saml_requests (
+	relay_hash TEXT PRIMARY KEY,
+	kind       TEXT NOT NULL,
+	request_id TEXT NOT NULL,
+	expires_ms INTEGER NOT NULL
+);
+
+-- IDs of SAML assertions already accepted, kept until they expire, so the
+-- same signed assertion can't be posted twice.
+CREATE TABLE IF NOT EXISTS saml_assertions (
+	assertion_id TEXT PRIMARY KEY,
+	expires_ms   INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS audit_events (

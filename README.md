@@ -14,7 +14,7 @@ A small Go web app that uses **Okta** as its identity provider:
 
 - [x] App skeleton: config, SQLite store, server-side sessions, RBAC, audit log, tests, CI
 - [x] OIDC sign-in (auth code + PKCE), JIT provisioning, RP-initiated logout ([Okta setup](docs/okta-setup.md))
-- [ ] SAML SP: metadata, ACS with signed-assertion validation, attribute mapping, Single Logout
+- [x] SAML SP: SP-initiated SSO, signed-assertion validation, attribute mapping, signed Single Logout
 - [ ] SCIM `/Users`: create, get, filter by `userName`, PUT, PATCH, deactivate
 - [ ] SCIM `/Groups`: create, PATCH members, rename, delete
 - [ ] Okta provisioning end-to-end + Okta SCIM spec tests
@@ -42,6 +42,8 @@ Open http://localhost:8080.
 - **OIDC is the authorization code flow with PKCE (S256) plus a client secret.** `state` is bound to the browser by a short-lived cookie *and* to a single-use server-side row holding the nonce and PKCE verifier, so callbacks can't be forged, replayed or injected (login CSRF). The ID token's signature, issuer, audience, expiry and nonce are all verified.
 - **Two provisioning modes.** `JIT_PROVISIONING=true`: the first sign-in creates the user and each sign-in refreshes groups from the token (a *missing* groups claim never strips roles). `false`: only SCIM can create users or change groups; a login token can't create or elevate an account.
 - **Logout ends the Okta session too** (RP-initiated logout with `id_token_hint`), otherwise the next sign-in would succeed silently.
+- **SAML responses are tied to a request we sent.** The ACS is a cross-site POST, so SameSite cookies can't bind it to the browser; instead the `RelayState` maps to a single-use AuthnRequest ID that must come back as `InResponseTo`. IdP-initiated (unsolicited) responses are refused, accepted assertion IDs are stored to block replay, and signatures, audience, destination and validity window are checked. SHA-1 signatures are rejected.
+- **SAML vs OIDC in this app:** both end in the same account-matching and session code, so the comparison is only the protocol: XML assertions signed by Okta and POSTed through the browser, versus a JWT fetched server-to-server with a code and PKCE.
 - **Pure-Go SQLite** (`modernc.org/sqlite`), so no C toolchain is needed on Windows or in the container.
 
 ## License
