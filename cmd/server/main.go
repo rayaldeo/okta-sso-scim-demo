@@ -54,6 +54,25 @@ func run(log *slog.Logger) error {
 		log.Info("oidc ready", "issuer", cfg.OIDCIssuer, "redirect_uri", cfg.OIDCRedirectURL())
 	}
 
+	if cfg.SAMLEnabled() {
+		key, cert, err := auth.LoadSAMLKeyPair(cfg.SAMLKeyFile, cfg.SAMLCertFile)
+		if err != nil {
+			return err
+		}
+		md, err := auth.FetchIDPMetadata(context.Background(), cfg.SAMLIdPMetadataURL)
+		if err != nil {
+			return err
+		}
+		opts.SAML, err = auth.NewSAML(auth.SAMLConfig{
+			EntityID: cfg.SAMLEntityID(), ACSURL: cfg.SAMLACSURL(), SLOURL: cfg.SAMLSLOURL(),
+			Key: key, Certificate: cert, IDPMetadata: md, Store: st,
+		})
+		if err != nil {
+			return err
+		}
+		log.Info("saml ready", "idp", md.EntityID, "entity_id", cfg.SAMLEntityID(), "acs", cfg.SAMLACSURL())
+	}
+
 	srv, err := web.New(cfg, st, log, opts)
 	if err != nil {
 		return err

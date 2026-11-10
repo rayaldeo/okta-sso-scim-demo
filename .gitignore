@@ -31,3 +31,4 @@ coverage.html
 .idea/
 .DS_Store
 Thumbs.db
+govulncheck.json

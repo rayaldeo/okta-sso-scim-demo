@@ -18,6 +18,7 @@ const (
 	LoginFailure     = "login.failure"
 	JITProvision     = "login.jit_provision"
 	Logout           = "logout"
+	IdPLogout        = "logout.idp_response"
 	AccessDenied     = "authz.denied"
 	SessionRevoked   = "session.revoked"
 	SCIMAuthFailure  = "scim.auth.failure"

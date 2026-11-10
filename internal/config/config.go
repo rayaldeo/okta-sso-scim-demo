@@ -125,6 +125,12 @@ func (c Config) OIDCRedirectURL() string { return c.BaseURL.String() + "/oidc/ca
 // PostLogoutRedirectURL is where Okta sends the browser after sign-out.
 func (c Config) PostLogoutRedirectURL() string { return c.BaseURL.String() + "/" }
 
+// SAML endpoints to register in Okta. The entity ID (SP issuer / audience)
+// is the metadata URL, a common convention.
+func (c Config) SAMLEntityID() string { return c.BaseURL.String() + "/saml/metadata" }
+func (c Config) SAMLACSURL() string   { return c.BaseURL.String() + "/saml/acs" }
+func (c Config) SAMLSLOURL() string   { return c.BaseURL.String() + "/saml/slo" }
+
 func parseBool(s string) (bool, error) {
 	switch strings.ToLower(s) {
 	case "true", "1", "yes":

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/rayaldeo/okta-sso-scim-demo/internal/audit"
+	"github.com/rayaldeo/okta-sso-scim-demo/internal/session"
 	"github.com/rayaldeo/okta-sso-scim-demo/internal/store"
 )
 
@@ -23,7 +24,11 @@ type loginIdentity struct {
 	DisplayName string
 	Groups      []string
 	HasGroups   bool // the IdP sent a groups attribute/claim (possibly empty)
-	IDToken     string
+
+	// Kept on the session for IdP logout.
+	IDToken          string
+	SAMLNameID       string
+	SAMLSessionIndex string
 }
 
 var (
@@ -91,7 +96,10 @@ func (s *Server) completeLogin(w http.ResponseWriter, r *http.Request, li loginI
 		s.loginFailed(w, r, li.Method, li.UserName, err)
 		return
 	}
-	if err := s.sessions.Start(ctx, w, r, u.ID, li.Method, li.IDToken); err != nil {
+	if err := s.sessions.Start(ctx, w, r, session.Login{
+		UserID: u.ID, Method: li.Method, IDToken: li.IDToken,
+		SAMLNameID: li.SAMLNameID, SAMLSessionIndex: li.SAMLSessionIndex,
+	}); err != nil {
 		s.loginFailed(w, r, li.Method, li.UserName, err)
 		return
 	}
