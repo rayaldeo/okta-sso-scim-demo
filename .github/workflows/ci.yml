@@ -21,4 +21,10 @@ jobs:
       - name: Test
         run: go test -race -count=1 ./...
       - name: Vulnerability check
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        # Fails on any reachable vulnerability not listed in
+        # .github/govulncheck-reviewed.txt (each entry records why it's safe).
+        # The plain-text report is printed first for the log.
+        run: |
+          go run golang.org/x/vuln/cmd/govulncheck@latest ./... || true
+          go run golang.org/x/vuln/cmd/govulncheck@latest -format json ./... > govulncheck.json
+          go run ./tools/vulngate .github/govulncheck-reviewed.txt < govulncheck.json

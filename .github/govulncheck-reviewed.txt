@@ -1,0 +1,6 @@
+# Vulnerabilities reviewed and found not to affect this code.
+# One Go vuln ID per line; anything after the ID is a comment.
+# CI fails on any reachable vulnerability NOT listed here. Re-review each
+# entry whenever the dependency is upgraded or the advisory is updated.
+
+GO-2026-6909  crewjam/saml: advisory text says "through v0.5.1" but its range covers all versions. In v0.6.3 Assertion.Issuer is a value type (no nil deref) and Subject.NameID is namespace-qualified. Proven by internal/auth/saml_vuln_test.go. Reviewed 2026-11-09.
